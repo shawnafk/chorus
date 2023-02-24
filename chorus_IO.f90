@@ -36,7 +36,7 @@ module chorus_IO
   real(fp) :: noise = 1.0e-2_fp  
  
   ! simulation parameters
-  integer, parameter  :: NT0 = 0, NT = 100
+  integer, parameter  :: NT0 = 0, NT = 800
   integer, parameter  :: NZ = 500, NJ = 1
   !integer, parameter  :: NZ = 500, NJ = 9
   !* simulation latitude region [-15deg, 15deg]

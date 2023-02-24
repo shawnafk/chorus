@@ -384,16 +384,27 @@ contains
    implicit none
    type(energetic_eon), intent(out) :: eon(-NZ:NZ,NJ)
    type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
+   complex(fp) :: ampint(-NZ:NZ), ampgrid(-NZ:NZ+1)
+   real(fp) :: zint(-NZ:NZ), zgrid(-NZ:NZ+1)
    integer :: k, l, i
+   do k = -NZ, NZ+1
+        ampgrid(k) = chorus(k)%ampl(1)
+        zgrid(k) = chorus(k)%zpos
+   end do
+   do k = -NZ, NZ
+         zint(k) = eon(k,1)%zpos
+   end do
+   call ispline(ampint, zint, 2*NZ+1, ampgrid, zgrid, 2*NZ+2, 1)
    do l = 1, NJ
       do k = -NZ, NZ-1
          !locate eon
-         i = INT(eon(k,l)%zpos/dZ)
-         if (i>-NZ) then
-                eon(k,l)%ampl = chorus(i)%ampl(1) + (chorus(i+1)%ampl(1) - chorus(i)%ampl(1))/(dZ)*(eon(k,l)%zpos-chorus(i)%zpos)
-          else 
-                eon(k,l)%ampl = (0,0)
-         end if
+         !i = INT(eon(k,l)%zpos/dZ)
+         !if (i>-NZ) then
+         !       eon(k,l)%ampl = chorus(i)%ampl(1) + (chorus(i+1)%ampl(1) - chorus(i)%ampl(1))/(dZ)*(eon(k,l)%zpos-chorus(i)%zpos)
+         ! else 
+         !       eon(k,l)%ampl = (0,0)
+         !end if
+         eon(k,l)%ampl=ampint(k)
       end do 
    end do
    return
