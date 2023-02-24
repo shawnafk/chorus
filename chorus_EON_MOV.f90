@@ -1,4 +1,4 @@
-module chorus_EON
+module chorus_EON_MOV
    use chorus_IO
    use chorus_TYPE
    use chorus_LIB
@@ -7,37 +7,34 @@ module chorus_EON
    implicit none
    private
 
-   !     public :: init_eon, trap_eon, shift_eon
-   public :: init_eon, trap_eon, shift_eon, shift_eon_sl
+   public :: init_eon_mov, trap_eon_mov, shift_eon_mov, interp_ampl, interp_intf, intgl_source_mov
+
 contains
-   subroutine init_eon(eon, chorus)
+   subroutine init_eon_mov(eon)
       implicit none
-      type(energetic_eon), intent(out) :: eon(-NZ:NZ,NJ)
-      type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
+      type(energetic_eon), intent(inout) :: eon(-NZ:NZ,NJ)
       integer :: k, l
       if ( .not. RESTART)  then
          do l = 1, NJ
             do k = -NZ, NZ
-               call set_feq(eon(k,l), chorus(k))
+               call set_feq(eon(k,l))
             end do
          end do
       end if
       return
-   end subroutine init_eon
+   end subroutine init_eon_mov
 
-
-   subroutine trap_eon(eon, chorus)
+   subroutine trap_eon_mov(eon)
       ! push one macro-particle
       implicit none
       type(energetic_eon), intent(inout) :: eon
-      type(chorus_mode), intent(inout) :: chorus
       real(fp) :: tstp(0:1), dtstp, err
       real(fp) :: fstp(0:Nq,0:Np,4)
       if ( .not. eon%is_resonant )  then
          eon%feon = 0.0_fp
          return
       end if
-      call get_Hamiltonian(eon, chorus)
+      call get_Hamiltonian(eon)
       call build_eon(eon)
       tstp(0) = 0.0_fp
       tstp(1) = min(dT, 4.0_fp*pi/(Lp*Nq))
@@ -77,7 +74,38 @@ contains
          end if
       end do
       return
-   end subroutine trap_eon
+   end subroutine trap_eon_mov
+
+   subroutine set_feq(eon)
+      ! energetic electron equilibrium distribution for one macro-particle
+      implicit none
+      type(energetic_eon), intent(inout) :: eon
+      real(fp) :: mu, Jdist1, Jdist2
+      integer :: j
+      do j = 0, Np
+         mu = max(eon%Jpos+eon%pcr+eon%pcor(j), small)
+         Jdist1 = exp(-mu*gyro0/(vperp*vperp))
+         if (loss_cone /= 0.0_fp ) then
+            Jdist2 = exp(-mu*gyro0/(loss_cone*vperp*vperp))
+            eon%feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)/(1.0_fp-loss_cone)        &
+               * exp(-0.5_fp*(eon%kmode*(eon%pcor(j)+eon%pcr)/vll)**2)           &
+               * exp(-mu*(eon%gyro-gyro0)/(vll*vll))*(Jdist1-Jdist2)
+            eon%dfeq(j) = -eon%feq(j)*((eon%kmode**2*eon%pcor(j)+eon%omega-gyro0)/(vll*vll)+gyro0/(vperp*vperp*loss_cone)*(loss_cone*Jdist1-Jdist2)/(Jdist1-Jdist2))
+         else
+            Jdist2 = 0.0_fp
+            eon%feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)/(1.0_fp)        &
+               * exp(-0.5_fp*(eon%kmode*(eon%pcor(j)+eon%pcr)/vll)**2)           &
+               * exp(-mu*(eon%gyro-gyro0)/(vll*vll))*(Jdist1-Jdist2)
+            eon%dfeq(j) = -eon%feq(j)*((eon%kmode**2*eon%pcor(j)+eon%omega-gyro0)        &
+               / (vll*vll)+gyro0/(vperp*vperp)*(Jdist1)/(Jdist1-Jdist2))
+
+         end if
+
+      end do
+      ! delta f
+      eon%feon = 0.0_fp
+      return
+   end subroutine set_feq
 
 
    subroutine rk23_adstep(fstp, dtstp, dH_q, dH_p, Sr_eon, err)
@@ -125,7 +153,7 @@ contains
       do j = 0, Np-1
          do i = 1, Nq-1
             ! calculate the spatial derivatives of the line integrated distribution
-            ! boundary value :: dfrk(0,0:Np-1,3), dfrk(Nq,0:Np-1,3)
+! boundary value :: dfrk(0,0:Np-1,3), dfrk(Nq,0:Np-1,3)
             dfrk(i,j,3) = upwind_deriv(frk(i-1,j,3), frk(i,j,3), frk(i+1,j,3),       &
                frk(i-1,j,4), frk(i,j,4), dH_p(i,j)+dH_p(i,j+1), dq)
          end do
@@ -133,7 +161,7 @@ contains
       do j = 1, Np-1
          do i = 0, Nq-1
             ! calculate the velocity derivative of the line integrated distribution
-            ! boundary value :: dfrk(0:Nq-1,0,4), dfrk(0:Nq-1,Np,4)
+! boundary value :: dfrk(0:Nq-1,0,4), dfrk(0:Nq-1,Np,4)
             dfrk(i,j,4) = upwind_deriv(frk(i,j-1,2), frk(i,j,2), frk(i,j+1,2),       &
                frk(i,j-1,4), frk(i,j,4), -dH_q(i,j)-dH_q(i+1,j), dp)
          end do
@@ -145,7 +173,7 @@ contains
       ! dfodt(0:Nq,0:Np,1)
       ! dfodt(0:Nq-1,0:Np,2)
       ! dfodt(0:Nq,0:Np-1,3)
-      ! dfodt(0:Nq-1,0:Np-1,4)
+! dfodt(0:Nq-1,0:Np-1,4)
       dfodt = 0.0_fp
       do j = 0, Np
          do i = 0, Nq
@@ -348,7 +376,7 @@ contains
       ! dfstp(0,0:Np,1),   dfstp(Nq,0:Np,1)
       ! dfstp(0:Nq,0,2),   dfstp(0:Nq,Np,2)
       ! dfstp(0,0:Np-1,3), dfstp(Nq,0:Np-1,3)
-      ! dfstp(0:Nq-1,0,4), dfstp(0:Nq-1,Np,4)
+! dfstp(0:Nq-1,0,4), dfstp(0:Nq-1,Np,4)
       implicit none
       real(fp), intent(in) :: fstp(0:Nq,0:Np,4)
       real(fp), intent(out) :: dfstp(0:Nq,0:Np,4)
@@ -391,24 +419,18 @@ contains
    end subroutine set_boundary
 
 
-   subroutine get_Hamiltonian(eon, chorus)
+   subroutine get_Hamiltonian(eon)
       ! Hamiltonian for one macro-particle
       implicit none
       type(energetic_eon), intent(inout) :: eon
-      type(chorus_mode), intent(in) :: chorus
       integer :: i, j
       real(fp) :: mu
       do j = 0, Np
          do i = 0, Nq
-            mu = max(eon%Jpos+chorus%pcr+eon%pcor(j), small)
-            eon%H0(i,j) = 0.5_fp*(chorus%kmode*eon%pcor(j))**2                             &
-               + sqrt(2.0_fp*chorus%gyro*mu)                                      &
-               * real(chorus%ampl(1)*exp(-mathj*eon%qcor(i)))
-            eon%dH0_q(i,j) = sqrt(2.0_fp*chorus%gyro*mu)                                   &
-               * aimag(chorus%ampl(1)*exp(-mathj*eon%qcor(i)))
-            eon%dH_p(i,j) = chorus%kmode*chorus%kmode*eon%pcor(j)                          &
-               + chorus%gyro/sqrt(2.0_fp*chorus%gyro*mu)                        &
-               * real(chorus%ampl(1)*exp(-mathj*eon%qcor(i)))
+            mu = max(eon%Jpos+eon%pcr+eon%pcor(j), small)
+            eon%H0(i,j) = 0.5_fp*(eon%kmode*eon%pcor(j))**2 + sqrt(2.0_fp*eon%gyro*mu) * real(eon%ampl*exp(-mathj*eon%qcor(i)))
+            eon%dH0_q(i,j) = sqrt(2.0_fp*eon%gyro*mu) * aimag(eon%ampl*exp(-mathj*eon%qcor(i)))
+            eon%dH_p(i,j) = eon%kmode*eon%kmode*eon%pcor(j) + eon%gyro/sqrt(2.0_fp*eon%gyro*mu) * real(eon%ampl*exp(-mathj*eon%qcor(i)))
             eon%dH_q(i,j) = eon%dH0_q(i,j) + eon%drg
          end do
       end do
@@ -477,7 +499,6 @@ contains
       return
    end subroutine collide_eon
 
-
    subroutine build_eon(eon)
       ! equilibrium source term for one macro-particle
       implicit none
@@ -512,60 +533,13 @@ contains
       return
    end subroutine build_eon
 
-
-   subroutine shift_eon(eon)
+   !eons push eon along z and interp feon to adject grids
+   subroutine shift_eon_mov(eon)
       implicit none
       type(energetic_eon), intent(inout) :: eon(-NZ:NZ,NJ)
-      integer :: k, l
-      do l = 1, NJ
-         do k = -NZ, NZ-1
-            eon(k,l)%feon = eon(k+1,l)%feon
-         end do
-         eon(NZ,l)%feon = 0.0_fp
-      end do
-      return
-   end subroutine shift_eon
-
-
-   subroutine set_feq(eon, chorus)
-      ! energetic electron equilibrium distribution for one macro-particle
-      implicit none
-      type(energetic_eon), intent(inout) :: eon
-      type(chorus_mode), intent(in) :: chorus
-      real(fp) :: mu, Jdist1, Jdist2
-      integer :: j
-      do j = 0, Np
-         mu = max(eon%Jpos+chorus%pcr+eon%pcor(j), small)
-         Jdist1 = exp(-mu*gyro0/(vperp*vperp))
-         if (loss_cone /= 0.0_fp ) then
-            Jdist2 = exp(-mu*gyro0/(loss_cone*vperp*vperp))
-            eon%feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)/(1.0_fp-loss_cone)        &
-               * exp(-0.5_fp*(chorus%kmode*(eon%pcor(j)+chorus%pcr)/vll)**2)           &
-               * exp(-mu*(chorus%gyro-gyro0)/(vll*vll))*(Jdist1-Jdist2)
-            eon%dfeq(j) = -eon%feq(j)*((chorus%kmode**2*eon%pcor(j)+chorus%omega-gyro0)/(vll*vll)+gyro0/(vperp*vperp*loss_cone)*(loss_cone*Jdist1-Jdist2)/(Jdist1-Jdist2))
-         else
-            Jdist2 = 0.0_fp
-            eon%feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)/(1.0_fp)        &
-               * exp(-0.5_fp*(chorus%kmode*(eon%pcor(j)+chorus%pcr)/vll)**2)           &
-               * exp(-mu*(chorus%gyro-gyro0)/(vll*vll))*(Jdist1-Jdist2)
-            eon%dfeq(j) = -eon%feq(j)*((chorus%kmode**2*eon%pcor(j)+chorus%omega-gyro0)        &
-               / (vll*vll)+gyro0/(vperp*vperp)*(Jdist1)/(Jdist1-Jdist2))
-
-         end if
-
-      end do
-      ! delta f
-      eon%feon = 0.0_fp
-      return
-   end subroutine set_feq
-!zhengjs added
-   subroutine shift_eon_sl(eon,chorus)
-      implicit none
-      type(energetic_eon), intent(inout) :: eon(-NZ:NZ,NJ)
-      type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
-      real(fp) :: omega, gyro, wp2, kmode, zpos
+      real(fp) :: omega, gyro, wp2, kmode, pcr, zpos
       real(fp) :: rk(4)
-      real(fp) :: newz, zmoved(-NZ:NZ)
+      real(fp) :: newz,newj
       integer :: k, l
       do l = 1, NJ
          do k = -NZ, NZ
@@ -577,101 +551,202 @@ contains
             wp2 = 1.0_fp+cold2*(zpos/(Lshell*RE))**2
             kmode = sqrt(omega**2+wp2*omega/(gyro-omega))
             rk(1) = (omega-gyro)/kmode
-            newz = zpos + 0.5_fp*dT*rk(1)
+            newz = eon(k,l)%zpos + 0.5_fp*dT*rk(1)
             ! RK2
             gyro = gyro0*(1.0_fp+4.5_fp*(newz/(Lshell*RE))**2)
             wp2 = 1.0_fp+cold2*(newz/(Lshell*RE))**2
             kmode = sqrt(omega**2+wp2*omega/(gyro-omega))
             rk(2) = (omega-gyro)/kmode
-            newz = zpos + 0.5_fp*dT*rk(2)
+            newz = eon(k,l)%zpos + 0.5_fp*dT*rk(2)
             ! RK3
             gyro = gyro0*(1.0_fp+4.5_fp*(newz/(Lshell*RE))**2)
             wp2 = 1.0_fp+cold2*(newz/(Lshell*RE))**2
             kmode = sqrt(omega**2+wp2*omega/(gyro-omega))
             rk(3) = (omega-gyro)/kmode
-            newz = zpos + dT*rk(3)
+            newz = eon(k,l)%zpos + dT*rk(3)
             ! RK4
             gyro = gyro0*(1.0_fp+4.5_fp*(newz/(Lshell*RE))**2)
             wp2 = 1.0_fp+cold2*(newz/(Lshell*RE))**2
             kmode = sqrt(omega**2+wp2*omega/(gyro-omega))
             rk(4) = (omega-gyro)/kmode
-            newz = zpos + dT*(rk(1)+2.0_fp*(rk(2)+rk(3))+rk(4))/6.0_fp
-            zmoved(k) = newz
+            newz = eon(k,l)%zpos + dT*(rk(1)+2.0_fp*(rk(2)+rk(3))+rk(4))/6.0_fp
+            !update Jpos and parameters
+            gyro = gyro0*(1.0_fp+4.5_fp*(newz/(Lshell*RE))**2)
+            wp2 = 1.0_fp+cold2*(newz/(Lshell*RE))**2
+            kmode = sqrt(omega**2+wp2*omega/(gyro-omega))
+            pcr = (omega-gyro)/kmode**2
+            newj = (eon(k,l)%const-0.5_fp*(omega-gyro)**2/kmode**2)/(omega-gyro)
+            eon(k,l)%zpos = newz
+            eon(k,l)%Jpos = newj
+            eon(k,l)%gyro = gyro
+            eon(k,l)%wp2 = wp2
+            eon(k,l)%kmode = kmode
+            eon(k,l)%pcr = pcr
          end do
          eon(NZ,l)%feon = 0.0_fp
       end do
-      !call interp_feon(eon,chorus,zmoved)
-      call spline_feon(eon,chorus,zmoved)
       return
-   end subroutine shift_eon_sl
+   end subroutine shift_eon_mov
 
-   subroutine interp_feon(eon,chorus,zmoved)
-      type(energetic_eon), intent(inout) :: eon(-NZ:NZ,NJ)
-      type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
-      real(fp), intent(in) :: zmoved(-NZ:NZ)
-      integer :: k, l, i, j, m, loc
-      real(fp) :: sumfeon(-NZ:NZ,NJ,0:Nq,0:Np,4)
-      !reset feon
-      do k = -NZ, NZ
-         do l = 1, NJ
-            do i = 0, Nq
-               do j = 0, Np
-                  do m = 1,4
-                     sumfeon(k,l,i,j,m) = 0
-                  end do
-               end do
-            end do
-         end do
-      end do
-      do k = -NZ, NZ-1
-         loc = INT(zmoved(k)/dZ)
-         do l = 1, NJ
-            do i = 0, Nq
-               do j = 0, Np
-                  do m = 1,4
-                     eon(loc,l)%feon(i,j,m) = eon(loc,l)%feon(i,j,m) + (1-(zmoved(k)-chorus(loc)%zpos)/dZ)*eon(k,l)%feon(i,j,m)
-                     eon(loc+1,l)%feon(i,j,m) = eon(loc+1,l)%feon(i,j,m) - (1-(zmoved(k)-chorus(loc+1)%zpos)/dZ)*eon(k,l)%feon(i,j,m)
-                  end do
-               end do
-            end do
-         end do
-      end do
-   end subroutine
 
-   !spline eon
-   subroutine spline_feon(eon,chorus,zmoved)
+   subroutine intgl_source_mov(eon)
+      ! chorus%Sr = kmode*nh*\iint dqcor*dpcor*dJact
+      !           * sqrt(2*gyro*(Jact+pcr+pcor))*feon*exp(mathj*qcor)
+      implicit none
       type(energetic_eon), intent(inout) :: eon(-NZ:NZ,NJ)
-      type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
-      real(fp), intent(in) :: zmoved(-NZ:NZ)
-      integer :: k, l, i, j, m
-      real(fp) :: zgrid(-NZ:NZ)
-      complex(fp) ::  feon_s(-NZ:NZ), feon_g(-NZ:NZ)
-      !grid zpos
-      do k = -NZ, NZ-1
-         zgrid(k) = chorus(k)%zpos
-      end do
+      complex(fp) :: jr(-NZ:NZ,NJ), Sr(-NZ:NZ)
+      real(fp) :: fdp(0:Nq), fdpdq(0:Nq-1), fvp(0:Np-1,2)
+      complex(fp) :: fqcor(0:Nq-1)
+      integer :: i, j, k, l
       do l = 1, NJ
-         do j = 0, Np
-            do i = 0, Nq
-               do m = 1, 4
-                  !extract feon
-                  do k = -NZ,NZ
-                     feon_s(k) = eon(k,l)%feon(i,j,m)
+         do k = -NZ, NZ
+            if ( eon(k,l)%is_resonant )   then
+               ! fdp = \int dpcor sqrt(2*gyro*(Jact+pcr+pcor))*feon
+               do i = 0, Nq
+                  do j = 0, Np-1
+                     fvp(j,1) = line_intg(sqrt(2.0_fp*eon(k,l)%gyro*max(eon(k,l)%Jact        &
+                        + eon(k,l)%pcr+eon(k,l)%pcor(j), 0.0_fp)),                     &
+                        sqrt(2.0_fp*eon(k,l)%gyro*max(eon(k,l)%Jact+eon(k,l)%pcr       &
+                        + 0.5_fp*(eon(k,l)%pcor(j)+eon(k,l)%pcor(j+1)), 0.0_fp)),      &
+                        sqrt(2.0_fp*eon(k,l)%gyro*max(eon(k,l)%Jact+eon(k,l)%pcr       &
+                        + eon(k,l)%pcor(j+1), 0.0_fp)), eon(k,l)%feon(i,j,1),          &
+                        eon(k,l)%feon(i,j,3), eon(k,l)%feon(i,j+1,1), dp)
                   end do
-                  !spline
-                  call ispline(feon_g, zgrid, 2*NZ+1, feon_s, zmoved, 2*NZ+1, 1)
-                  !reset feon to i j m
-                  do k = -NZ,NZ
-                     eon(k,l)%feon(i,j,m) = real(feon_g(k))
-                     !write(6,*) feon_g(k)
-                  end do
+                  fdp(i) = sum(fvp(0:Np-1,1))
                end do
-            end do
+               ! fdpdq = \int_q^{q+dq} dqcor \int dpcor sqrt(2*gyro*(Jact+pcr+pcor))*feon
+               do i = 0, Nq-1
+                  do j = 0, Np-1
+                     fvp(j,2) = line_intg(sqrt(2.0_fp*eon(k,l)%gyro*max(eon(k,l)%Jact        &
+                        + eon(k,l)%pcr+eon(k,l)%pcor(j), 0.0_fp)),                     &
+                        sqrt(2.0_fp*eon(k,l)%gyro*max(eon(k,l)%Jact+eon(k,l)%pcr       &
+                        + 0.5_fp*(eon(k,l)%pcor(j)+eon(k,l)%pcor(j+1)), 0.0_fp)),      &
+                        sqrt(2.0_fp*eon(k,l)%gyro*max(eon(k,l)%Jact+eon(k,l)%pcr       &
+                        + eon(k,l)%pcor(j+1), 0.0_fp)), eon(k,l)%feon(i,j,2),          &
+                        eon(k,l)%feon(i,j,4), eon(k,l)%feon(i,j+1,2), dp)
+                  end do
+                  fdpdq(i) = sum(fvp(0:Np-1,2))
+               end do
+               ! jr = kmode * \int dqcor*dpcor sqrt(2*gyro*(Jact+pcr+pcor))*feon*exp(mathj*\xi)
+               do i = 0, Nq-1
+                  fqcor(i) = line_intg(cos(eon(k,l)%qcor(i)),                                &
+                     cos(0.5_fp*(eon(k,l)%qcor(i)+eon(k,l)%qcor(i+1))),              &
+                     cos(eon(k,l)%qcor(i+1)), fdp(i), fdpdq(i), fdp(i+1), dq)        &
+                     + mathj*line_intg(sin(eon(k,l)%qcor(i)),                          &
+                     sin(0.5_fp*(eon(k,l)%qcor(i)+eon(k,l)%qcor(i+1))),              &
+                     sin(eon(k,l)%qcor(i+1)), fdp(i), fdpdq(i), fdp(i+1), dq)
+               end do
+               jr(k,l) = eon(k,l)%kmode*sum(fqcor)
+            else
+               jr(k,l) = (0.0_fp, 0.0_fp)
+            end if
          end do
       end do
+      if (NJ == 1)  then
+         forall(k=-NZ:NZ) Sr(k) = vperp*vperp/gyro0*exp(1.0_fp)*jr(k,1)
+      else
+         forall(k=-NZ:NZ) Sr(k) = trapez(eon(k,1:NJ)%Jact, jr(k,1:NJ), NJ)                   &
+            + 0.5_fp*(eon(k,1)%Jact+eon(k,1)%pcr)*jr(k,1)
+      end if
+      do l = 1, NJ
+         do k = -NZ+1, NZ
+            eon(k,l)%intf = 0.5_fp*nh*(Sr(k)+Sr(k-1))
+         end do
+      end do
+      return
+   end subroutine intgl_source_mov
+
+   subroutine cubic_abcd(a,b,c,d,df0,f0,f1,df1)
+      implicit none
+      complex(fp), intent(in) :: df0,f0,f1,df1
+      complex(fp), intent(out) :: a,b,c,d
+      d = f0
+      c = df0
+      b = -3*d/dZ**2 - 2 * c/dZ + 3*f1/dZ**2 - df1/dZ
+      a = df1/dZ**2 - 2*f1/dZ**3 + c/dZ**2 + 2*d/dZ**3
+   end subroutine
+   subroutine icubic(y,x,xl,ps)
+      complex(fp), intent(in) :: ps(4)
+      real(fp), intent(in) :: x, xl
+      complex(fp), intent(inout) :: y
+      complex(fp) :: a,b,c,d
+      call cubic_abcd(a,b,c,d,(ps(2)-ps(1))/dZ,ps(2),ps(3),(ps(4)-ps(3))/dZ)
+      y = a*(x-xl)**3 + b*(x-xl)**2 + c*(x-xl) + d 
    end subroutine
 
-end module chorus_EON
+   subroutine interp_ampl(eon,chorus,flag)
+      implicit none
+      type(energetic_eon), intent(out) :: eon(-NZ:NZ,NJ)
+      type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
+      complex(fp) :: ampint(-NZ:NZ), ampgrid(-NZ:NZ+1)
+      integer, intent(in) :: flag
+      real(fp) :: zint(-NZ:NZ), zgrid(-NZ:NZ+1)
+      integer :: k, l, i
+      if (flag .eq. 0) then
+      do l = 1, NJ
+         do k = -NZ, NZ-1
+            !locate eon
+            i = INT(eon(k,l)%zpos/dZ)
+            if (i>-NZ) then
+               eon(k,l)%ampl = chorus(i)%ampl(1) + (chorus(i+1)%ampl(1) - chorus(i)%ampl(1))/(dZ)*(eon(k,l)%zpos-chorus(i)%zpos)
+            else
+               eon(k,l)%ampl = (0,0)
+            end if
+         end do
+      end do
+      else if (flag .eq. 1) then
+         do l = 1, NJ
+            do k = -NZ, NZ-1
+               !locate eon
+               i = INT(eon(k,l)%zpos/dZ)
+               if (i<-NZ) then
+                  eon(k,l)%ampl = (0,0)
+               else if (i .eq. -NZ) then
+                  call icubic( eon(k,l)%ampl, eon(k,l)%zpos,chorus(k)%zpos,(/(0.0_fp,0.0_fp), chorus(i)%ampl(1), chorus(i+1)%ampl(1) , chorus(i+2)%ampl(1) /))
+               else
+                  call icubic( eon(k,l)%ampl, eon(k,l)%zpos,chorus(k)%zpos,(/chorus(i-1)%ampl(1), chorus(i)%ampl(1), chorus(i+1)%ampl(1) , chorus(i+2)%ampl(1)/))
+               end if
+            end do
+         end do
+      else if (flag .eq. 2) then
+         do k = -NZ, NZ+1
+            ampgrid(k) = chorus(k)%ampl(1)
+            zgrid(k) = chorus(k)%zpos
+         end do
+         do k = -NZ, NZ
+            zint(k) = eon(k,1)%zpos
+         end do
+         call ispline(ampint, zint, 2*NZ+1, ampgrid, zgrid, 2*NZ+2, 1)
+         do l = 1, NJ
+            do k = -NZ, NZ-1
+               eon(k,l)%ampl=ampint(k)
+            end do
+         end do
+      end if
+         return
+      end subroutine interp_ampl
+
+      subroutine interp_intf(eon,chorus)
+         implicit none
+         type(energetic_eon), intent(in) :: eon(-NZ:NZ,NJ)
+         type(chorus_mode), intent(out) :: chorus(-NZ:NZ+1)
+         complex(fp) :: intf
+         integer :: k, i
+         !reset current
+         forall(k = -NZ+1:NZ)  chorus(k)%Sr = (0.0_fp, 0.0_fp)
+         do k = -NZ, NZ-1
+            i = INT(eon(k,1)%zpos/dZ)
+            if (i>-NZ) then
+               intf = eon(k,1)%intf
+               chorus(i)%Sr = chorus(i)%Sr + (eon(k,1)%zpos-chorus(i)%zpos)/dZ*intf
+               chorus(i+1)%Sr = chorus(i+1)%Sr - (eon(k,1)%zpos-chorus(i+1)%zpos)/dZ*intf
+            end if
+         end do
+         chorus(-NZ)%Sr = (0.0_fp, 0.0_fp)
+         chorus(NZ+1)%Sr = (0.0_fp, 0.0_fp)
+         return
+      end subroutine interp_intf
+end module chorus_EON_MOV
 
 
 
@@ -685,18 +760,18 @@ end module chorus_EON
  !!$  implicit none
  !!$  type(energetic_eon) :: eon(0:NZ)
  !!$  type(chorus_mode) :: chorus(0:NZ+1)
- !!$  real(fp) :: dist(0:Nq,0:Np)
+!!$  real(fp) :: dist(0:Nq,0:Np)
  !!$  integer :: tstep, i, j, k
  !!$  call init_chorus(chorus)
- !!$  call init_eon(eon,chorus)
+!!$  call init_eon(eon,chorus)
  !!$  call save_output('chorus.out', chorus%ampl(1), NZ+1, .FALSE.)
  !!$  do tstep = NT0+1, NT
  !!$     do k = 1, NZ
- !!$        call trap_eon(eon(k), chorus(k))
+!!$        call trap_eon(eon(k), chorus(k))
  !!$        write(*,*) 'k : ', k
  !!$     end do
  !!$     call update_chorus(chorus, eon)
- !!$     call shift_eon(eon)
+!!$     call shift_eon(eon)
  !!$     write(*,*) 'tstep : ', tstep,                                              &
  !!$          sqrt(sqrt(2.0_fp*chorus(NZ/2)%gyro*max(C0+chorus(NZ/2)%pres,0.0_fp))  &
  !!$        * abs(chorus(NZ/2)%ampl(1)))

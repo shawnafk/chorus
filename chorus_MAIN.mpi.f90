@@ -1,192 +1,191 @@
 module diagnose
-   use chorus_IO
-   use chorus_TYPE
-   use chorus_LIB
-   use chorus_INIT
-   use chorus_WAVE
-   use chorus_EON
-   implicit none
+    use chorus_IO
+    use chorus_TYPE
+    use chorus_LIB
+    use chorus_INIT
+    use chorus_WAVE
+    use chorus_EON
+    implicit none
 
 contains
-   subroutine output(eon, chorus, tstep)
-      implicit none
-      type(energetic_eon), intent(in) :: eon(-NZ:NZ,NJ)
-      type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
-      integer, intent(in) :: tstep
-      real(fp) :: omega, kmode(-NZ:NZ), gyro(-NZ:NZ), wp2(-NZ:NZ)
-      real(fp) :: vr(-NZ:NZ), vg(-NZ:NZ), gamma(-NZ:NZ)
-      real(fp) :: feq(0:Np), dist(0:Nq,0:Np)
-      integer :: i, j, k, l
-      logical :: IS_APPEND
-      integer, save :: call_id = 0
-      call_id = call_id + 1
-      omega = chorus(1)%omega
-      kmode = eon(:,1)%kmode
-      gyro = eon(:,1)%gyro
-      wp2 = eon(:,1)%wp2
-      if (call_id == 1 .and. (.not. restart)) then
-         IS_APPEND = .FALSE.
-         forall(k=-NZ:NZ) vr(k) = (omega-gyro(k))/kmode(k)
-         forall(k=-NZ:NZ) vg(k) = 2.0_fp*kmode(k)/(2.0_fp*omega+wp2(k)*gyro(k)/(gyro(k)-omega)**2)
-         forall(k=-NZ:NZ) gamma(k) = sqrt(2.0_fp*pi)*vg(k)*gyro(k)*nh                           &
-            / (4.0_fp*kmode(k)*kmode(k)*vll)                             &
-            * exp(-0.5_fp*(omega-gyro(k))**2/(kmode(k)*vll)**2)          &
-            / (1.0_fp+aniso*(gyro(k)-gyro0)/gyro0)**2                    &
-            / (1.0_fp+loss_cone*aniso*(gyro(k)-gyro0)/gyro0)**2          &
-            * (loss_cone*aniso*aniso*(gyro(k)+gyro0-2.0_fp*omega)        &
-            * (gyro(k)-gyro0)/(gyro0*gyro0)+(1.0_fp+loss_cone)           &
-            * aniso*(gyro0-omega)/gyro0-1.0_fp)
-         call save_output('zpos.out', eon(-NZ:NZ,1)%zpos, 2*NZ+1, IS_APPEND)
-         call save_output('Jact.out', eon(-NZ:NZ,1:NJ)%Jact, 2*NZ+1, NJ, IS_APPEND)
-         call save_output('kmode.out', kmode, 2*NZ+1, IS_APPEND)
-         call save_output('gyro.out', gyro, 2*NZ+1, IS_APPEND)
-         call save_output('wp2.out', wp2, 2*NZ+1, IS_APPEND)
-         call save_output('vg.out', vg, 2*NZ+1, IS_APPEND)
-         call save_output('vr.out', vr, 2*NZ+1, IS_APPEND)
-         call save_output('gamma.out', gamma, 2*NZ+1, IS_APPEND)
-         call save_output('chorus.out', chorus(-NZ:NZ+1)%ampl(1), 2*NZ+2, IS_APPEND)
-         call save_output('source.out', chorus(-NZ:NZ+1)%Sr, 2*NZ+2, IS_APPEND)
-      else
-         IS_APPEND = .TRUE.
-         call save_output('zpos.out', eon(-NZ:NZ,1)%zpos, 2*NZ+1, IS_APPEND)
-         call save_output('Jact.out', eon(-NZ:NZ,1:NJ)%Jact, 2*NZ+1, NJ, IS_APPEND)
-         call save_output('chorus.out', chorus(-NZ:NZ+1)%ampl(1), 2*NZ+2, IS_APPEND)
-         call save_output('source.out', chorus(-NZ:NZ+1)%Sr, 2*NZ+2, IS_APPEND)
-         if (mod(tstep, nsave) == 0) then
-            l = ceiling(NJ/2.0_fp)
-            if (loss_cone/=0) then
-               do k = -NZ, NZ
-                  forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)            &
-                     / (1.0_fp-loss_cone)*exp(-0.5_fp*kmode(k)*kmode(k)       &
-                     * (eon(k,l)%pcor(j)+eon(k,l)%pcr)**2/(vll*vll))          &
-                     * exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)     &
-                     * (eon(k,l)%gyro-gyro0)/(vll*vll))                       &
-                     * (exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)    &
-                     * gyro0/(vperp*vperp))                                   &
-                     - exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)     &
-                     * gyro0/(loss_cone*vperp*vperp)))
-                  forall(i=0:Nq,j=0:Np) dist(i,j) = eon(k,l)%feon(i,j,1) + feq(j)
-                  call save_output('dist.out', dist, Nq+1, Np+1, IS_APPEND)
-               end do
-            else
-               do k = -NZ, NZ
-                  forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)            &
-                     *exp(-0.5_fp*kmode(k)*kmode(k)       &
-                     * (eon(k,l)%pcor(j)+eon(k,l)%pcr)**2/(vll*vll))          &
-                     * exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)     &
-                     * (eon(k,l)%gyro-gyro0)/(vll*vll))                       &
-                     * (exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)    &
-                     * gyro0/(vperp*vperp)))
-                  forall(i=0:Nq,j=0:Np) dist(i,j) = eon(k,l)%feon(i,j,1) + feq(j)
-                  call save_output('dist.out', dist, Nq+1, Np+1, IS_APPEND)
-               end do
+    subroutine output(eon, chorus, tstep)
+        implicit none
+        type(energetic_eon), intent(in) :: eon(-NZ:NZ,NJ)
+        type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
+        integer, intent(in) :: tstep
+        real(fp) :: omega, kmode(-NZ:NZ), gyro(-NZ:NZ), wp2(-NZ:NZ)
+        real(fp) :: vr(-NZ:NZ), vg(-NZ:NZ), gamma(-NZ:NZ)
+        real(fp) :: feq(0:Np), dist(0:Nq,0:Np)
+        integer :: i, j, k, l
+        logical :: IS_APPEND
+        integer, save :: call_id = 0
+        call_id = call_id + 1
+        omega = chorus(1)%omega
+        kmode = eon(:,1)%kmode
+        gyro = eon(:,1)%gyro
+        wp2 = eon(:,1)%wp2
+        if (call_id == 1 .and. (.not. restart)) then
+            IS_APPEND = .FALSE.
+            forall(k=-NZ:NZ) vr(k) = (omega-gyro(k))/kmode(k)
+                forall(k=-NZ:NZ) vg(k) = 2.0_fp*kmode(k)/(2.0_fp*omega+wp2(k)*gyro(k)/(gyro(k)-omega)**2)
+                    forall(k=-NZ:NZ) gamma(k) = sqrt(2.0_fp*pi)*vg(k)*gyro(k)*nh                           &
+                            / (4.0_fp*kmode(k)*kmode(k)*vll)                             &
+                            * exp(-0.5_fp*(omega-gyro(k))**2/(kmode(k)*vll)**2)          &
+                            / (1.0_fp+aniso*(gyro(k)-gyro0)/gyro0)**2                    &
+                            / (1.0_fp+loss_cone*aniso*(gyro(k)-gyro0)/gyro0)**2          &
+                            * (loss_cone*aniso*aniso*(gyro(k)+gyro0-2.0_fp*omega)        &
+                            * (gyro(k)-gyro0)/(gyro0*gyro0)+(1.0_fp+loss_cone)           &
+                            * aniso*(gyro0-omega)/gyro0-1.0_fp)
+                        call save_output('zpos.out', eon(-NZ:NZ,1)%zpos, 2*NZ+1, IS_APPEND)
+                        call save_output('Jact.out', eon(-NZ:NZ,1:NJ)%Jact, 2*NZ+1, NJ, IS_APPEND)
+                        call save_output('kmode.out', kmode, 2*NZ+1, IS_APPEND)
+                        call save_output('gyro.out', gyro, 2*NZ+1, IS_APPEND)
+                        call save_output('wp2.out', wp2, 2*NZ+1, IS_APPEND)
+                        call save_output('vg.out', vg, 2*NZ+1, IS_APPEND)
+                        call save_output('vr.out', vr, 2*NZ+1, IS_APPEND)
+                        call save_output('gamma.out', gamma, 2*NZ+1, IS_APPEND)
+                        call save_output('chorus.out', chorus(-NZ:NZ+1)%ampl(1), 2*NZ+2, IS_APPEND)
+                        call save_output('source.out', chorus(-NZ:NZ+1)%Sr, 2*NZ+2, IS_APPEND)
+                    else
+                        IS_APPEND = .TRUE.
+                        if (mod(tstep, nsave_w) == 0) then
+                                call save_output('chorus.out', chorus(-NZ:NZ+1)%ampl(1), 2*NZ+2, IS_APPEND)
+                                call save_output('source.out', chorus(-NZ:NZ+1)%Sr, 2*NZ+2, IS_APPEND)
+                        end if
+                        if (mod(tstep, nsave_d) == 0) then
+                            l = ceiling(NJ/2.0_fp)
+                            if (loss_cone/=0) then
+                            do k = -NZ, NZ
+                            forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)            &
+                                    / (1.0_fp-loss_cone)*exp(-0.5_fp*kmode(k)*kmode(k)       &
+                                    * (eon(k,l)%pcor(j)+eon(k,l)%pcr)**2/(vll*vll))          &
+                                    * exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)     &
+                                    * (eon(k,l)%gyro-gyro0)/(vll*vll))                       &
+                                    * (exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)    &
+                                    * gyro0/(vperp*vperp))                                   &
+                                    - exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)     &
+                                    * gyro0/(loss_cone*vperp*vperp)))
+                                forall(i=0:Nq,j=0:Np) dist(i,j) = eon(k,l)%feon(i,j,1) + feq(j)
+                                    call save_output('dist.out', dist, Nq+1, Np+1, IS_APPEND)
+                                    end do
+                            else 
+                            do k = -NZ, NZ
+                            forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)            &
+                                    *exp(-0.5_fp*kmode(k)*kmode(k)       &
+                                    * (eon(k,l)%pcor(j)+eon(k,l)%pcr)**2/(vll*vll))          &
+                                    * exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)     &
+                                    * (eon(k,l)%gyro-gyro0)/(vll*vll))                       &
+                                    * (exp(-(eon(k,l)%Jact+eon(k,l)%pcor(j)+eon(k,l)%pcr)    &
+                                    * gyro0/(vperp*vperp)))
+                                forall(i=0:Nq,j=0:Np) dist(i,j) = eon(k,l)%feon(i,j,1) + feq(j)
+                                    call save_output('dist.out', dist, Nq+1, Np+1, IS_APPEND)
+                                    end do
 
-            end if
-         end if
-      end if
-      ! checkpoint directory
-      if (mod(tstep, ncheck) == 0)  then
-         call create_directory('./checkpoint')
-         ! store particle array
-         open(unit=50, file='./checkpoint/eon.out', action='write', status='replace',     &
-            form='unformatted')
-         write(50) eon
-         close(unit=50)
-         ! store wave array
-         open(unit=60, file='./checkpoint/chorus.out', action='write', status='replace',   &
-            form='unformatted')
-         write(60) chorus
-         close(unit=60)
-      end if
-      return
-   end subroutine output
-
-
-   subroutine output_resonance(eon, res_id)
-      implicit none
-      type(energetic_eon), intent(in) :: eon(-NZ:NZ,NJ)
-      integer, intent(in) :: res_id(2)
-      type(energetic_eon) :: res_eon
-      integer :: i, j
-      real(fp) :: feq(0:Np), res_dist(0:Nq,0:Np)
-      if (res_id(1) < -NZ .or. res_id(1) > NZ)  then
-         call write_log('the locked resonance left the region.')
-      else
-         res_eon = eon(res_id(1),res_id(2))
-         if(loss_cone /= 0) then
-            forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)             &
-               / (1.0_fp-loss_cone)*exp(-0.5_fp*res_eon%kmode**2         &
-               * (res_eon%pcor(j)+res_eon%pcr)**2/(vll*vll))             &
-               * exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)         &
-               * (res_eon%gyro-gyro0)/(vll*vll))                         &
-               * (exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)        &
-               * gyro0/(vperp*vperp))                                    &
-               - exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)         &
-               * gyro0/(loss_cone*vperp*vperp)))
-         else
-            forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)             &
-               * exp(-0.5_fp*res_eon%kmode**2         &
-               * (res_eon%pcor(j)+res_eon%pcr)**2/(vll*vll))             &
-               * exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)         &
-               * (res_eon%gyro-gyro0)/(vll*vll))                         &
-               * (exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)        &
-               * gyro0/(vperp*vperp)))
-         end if
-         forall(i=0:Nq,j=0:Np)  res_dist(i,j) = eon(res_id(1),res_id(2))%feon(i,j,1)+feq(j)
-         call save_output('res_dist.out', res_dist, Nq+1, Np+1, .TRUE.)
-      end if
-      return
-   end subroutine output_resonance
+                            end if
+                                end if
+                            end if
+                            ! checkpoint directory
+                            if (mod(tstep, ncheck) == 0)  then
+                                call create_directory('./checkpoint')
+                                ! store particle array
+                                open(unit=50, file='./checkpoint/eon.out', action='write', status='replace',     &
+                                    form='unformatted')
+                                write(50) eon
+                                close(unit=50)
+                                ! store wave array
+                                open(unit=60, file='./checkpoint/chorus.out', action='write', status='replace',   &
+                                    form='unformatted')
+                                write(60) chorus
+                                close(unit=60)
+                            end if
+                            return
+                        end subroutine output
 
 
-   subroutine finalize(eon, chorus, cpu_time)
-      implicit none
-      type(energetic_eon), intent(in) :: eon(-NZ:NZ,NJ)
-      type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
-      real(fp), intent(in) :: cpu_time
-      call create_directory('./restart')
-      ! store particle array
-      open(unit=50, file='./restart/eon.out', action='write', status='replace',    &
-         form='unformatted')
-      write(50) eon
-      close(unit=50)
-      ! store wave array
-      open(unit=60, file='./restart/chorus.out', action='write', status='replace', &
-         form='unformatted')
-      write(60) chorus
-      close(unit=60)
-      call write_log('Wall Time(second) = ', cpu_time)
-      call write_log('End of Simulation !')
-      return
-   end subroutine finalize
+                        subroutine output_resonance(eon, res_id)
+                            implicit none
+                            type(energetic_eon), intent(in) :: eon(-NZ:NZ,NJ)
+                            integer, intent(in) :: res_id(2)
+                            type(energetic_eon) :: res_eon
+                            integer :: i, j
+                            real(fp) :: feq(0:Np), res_dist(0:Nq,0:Np)
+                            if (res_id(1) < -NZ .or. res_id(1) > NZ)  then
+                                call write_log('the locked resonance left the region.')
+                            else
+                                res_eon = eon(res_id(1),res_id(2))
+                                if(loss_cone /= 0) then
+                                forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)             &
+                                        / (1.0_fp-loss_cone)*exp(-0.5_fp*res_eon%kmode**2         &
+                                        * (res_eon%pcor(j)+res_eon%pcr)**2/(vll*vll))             &
+                                        * exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)         &
+                                        * (res_eon%gyro-gyro0)/(vll*vll))                         &
+                                        * (exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)        &
+                                        * gyro0/(vperp*vperp))                                    &
+                                        - exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)         &
+                                        * gyro0/(loss_cone*vperp*vperp)))
+                                 else
+                                 forall(j=0:Np) feq(j) = gyro0/((2.0_fp*pi)**1.5_fp*vperp*vperp*vll)             &
+                                        * exp(-0.5_fp*res_eon%kmode**2         &
+                                        * (res_eon%pcor(j)+res_eon%pcr)**2/(vll*vll))             &
+                                        * exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)         &
+                                        * (res_eon%gyro-gyro0)/(vll*vll))                         &
+                                        * (exp(-(res_eon%Jact+res_eon%pcor(j)+res_eon%pcr)        &
+                                        * gyro0/(vperp*vperp)))
+                                    end if 
+                                    forall(i=0:Nq,j=0:Np)  res_dist(i,j) = eon(res_id(1),res_id(2))%feon(i,j,1)+feq(j)
+                                        call save_output('res_dist.out', res_dist, Nq+1, Np+1, .TRUE.)
+                                    end if
+                                    return
+                                end subroutine output_resonance
 
-end module diagnose
+
+                                subroutine finalize(eon, chorus, cpu_time)
+                                    implicit none
+                                    type(energetic_eon), intent(in) :: eon(-NZ:NZ,NJ)
+                                    type(chorus_mode), intent(in) :: chorus(-NZ:NZ+1)
+                                    real(fp), intent(in) :: cpu_time
+                                    call create_directory('./restart')
+                                    ! store particle array
+                                    open(unit=50, file='./restart/eon.out', action='write', status='replace',    &
+                                        form='unformatted')
+                                    write(50) eon
+                                    close(unit=50)
+                                    ! store wave array
+                                    open(unit=60, file='./restart/chorus.out', action='write', status='replace', &
+                                        form='unformatted')
+                                    write(60) chorus
+                                    close(unit=60)
+                                    call write_log('Wall Time(second) = ', cpu_time)
+                                    call write_log('End of Simulation !')
+                                    return
+                                end subroutine finalize
+
+                            end module diagnose
 
 
-program chorus_MAIN
-   use chorus_IO
-   use chorus_TYPE
-   use chorus_LIB
-   use chorus_INIT
-   use chorus_WAVE
-   use chorus_EON
-   use diagnose
-   use omp_lib
-   use mpi
-   implicit none
-   !temp used for calculate address
-   type(energetic_eon), allocatable:: eon_temp
-   type(chorus_mode),  allocatable:: chorus_temp
-   !real for init
-   type(energetic_eon), allocatable:: eon(:,:)
-   type(chorus_mode),  allocatable:: chorus(:)
-   !for proc
-   type(energetic_eon), allocatable:: peon(:,:)
-   type(chorus_mode), allocatable:: pchorus(:)
-   integer :: tstep, k, l, i
-   real(fp) :: start0, start, tic, toc
-   integer ierr, num_procs, rank_id
-   integer :: len_patch
+                            program chorus_MAIN
+                                use chorus_IO
+                                use chorus_TYPE
+                                use chorus_LIB
+                                use chorus_INIT
+                                use chorus_WAVE
+                                use chorus_EON
+                                use diagnose
+                                use omp_lib
+                                use mpi
+                                implicit none
+                                type(energetic_eon), allocatable:: eon_temp
+                                type(chorus_mode),  allocatable:: chorus_temp
+                                type(energetic_eon), allocatable:: eon(:,:)
+                                type(chorus_mode),  allocatable:: chorus(:)
+                                type(energetic_eon), allocatable:: peon(:,:)
+                                type(chorus_mode), allocatable:: pchorus(:)
+                                integer :: tstep, k, l, i
+                                real(fp) :: start0, start, tic, toc
+                                integer ierr, num_procs, rank_id
+                                integer :: len_patch
+
+
    integer :: thJ
    integer :: eon_blockcounts(23), eon_int_offsets(23), mpi_eon, eon_member_types(23)
    integer :: chorus_blockcounts(8), chorus_int_offsets(8), mpi_chorus, chorus_member_types(8)
@@ -244,147 +243,140 @@ program chorus_MAIN
    call mpi_type_struct(23, eon_blockcounts, eon_int_offsets, eon_member_types, mpi_eon, ierr)
    call mpi_type_commit(mpi_eon, ierr)
 
-   call mpi_get_address(chorus_temp%zpos, chorus_offsets(1), ierr)
-   call mpi_get_address(chorus_temp%ampl, chorus_offsets(2), ierr)
-   call mpi_get_address(chorus_temp%Sr, chorus_offsets(3), ierr)
-   call mpi_get_address(chorus_temp%omega, chorus_offsets(4), ierr)
-   call mpi_get_address(chorus_temp%gyro, chorus_offsets(5), ierr)
-   call mpi_get_address(chorus_temp%wp2, chorus_offsets(6), ierr)
-   call mpi_get_address(chorus_temp%kmode, chorus_offsets(7),ierr)
-   call mpi_get_address(chorus_temp%pcr, chorus_offsets(8), ierr)
-   do i = 2, size(chorus_offsets)
-      chorus_int_offsets(i) = chorus_offsets(i) - chorus_offsets(1)
-   end do
-   chorus_int_offsets(1) = 0
-   chorus_member_types = (/mpi_double,mpi_double_complex,mpi_double_complex, &
-      mpi_double,mpi_double,mpi_double,mpi_double,mpi_double/)
-   chorus_blockcounts = (/1, 3, 1, 1, 1, 1, 1, 1/)
-   call mpi_type_struct(8, chorus_blockcounts, chorus_int_offsets, chorus_member_types, mpi_chorus, ierr)
-   call mpi_type_commit(mpi_chorus, ierr)
+                                call mpi_get_address(chorus_temp%zpos, chorus_offsets(1), ierr)
+                                call mpi_get_address(chorus_temp%ampl, chorus_offsets(2), ierr)
+                                call mpi_get_address(chorus_temp%Sr, chorus_offsets(3), ierr)
+                                call mpi_get_address(chorus_temp%omega, chorus_offsets(4), ierr)
+                                call mpi_get_address(chorus_temp%gyro, chorus_offsets(5), ierr)
+                                call mpi_get_address(chorus_temp%wp2, chorus_offsets(6), ierr)
+                                call mpi_get_address(chorus_temp%kmode, chorus_offsets(7),ierr)
+                                call mpi_get_address(chorus_temp%pcr, chorus_offsets(8), ierr)
+                                do i = 2, size(chorus_offsets)
+                                chorus_int_offsets(i) = chorus_offsets(i) - chorus_offsets(1)
+                                end do
+                                chorus_int_offsets(1) = 0
+                                chorus_member_types = (/mpi_double,mpi_double_complex,mpi_double_complex, &
+                                    mpi_double,mpi_double,mpi_double,mpi_double,mpi_double/)
+                                chorus_blockcounts = (/1, 3, 1, 1, 1, 1, 1, 1/)
+                                call mpi_type_struct(8, chorus_blockcounts, chorus_int_offsets, chorus_member_types, mpi_chorus, ierr) 
+                                call mpi_type_commit(mpi_chorus, ierr) 
 
-   !!!initialize parallel threads info
-   if (rank_id == 0) then
-      !tic = OMP_get_wtime()
-      allocate(chorus(-NZ:NZ+1),eon(-NZ:NZ,NJ))
-      call set_init(eon, chorus)
-      call init_chorus(chorus)
-      call init_eon(eon)
-      toc = OMP_get_wtime()
-      !write(6,*) 'time spent on initializing eon and chorus: ', toc - tic
-      write(6,*) 'NZ=', NZ, 'NJ=', NJ, 'NT=', NT, 'dT=', dT, 'PROC=', num_procs, 'omega_l', eon(1,1)%omega, 'Jconst=',eon(1,1)%const
-   end if
-   if(mod(2*NZ,num_procs) /=0) then
-      stop "procs much be factor of NZ"
-   end if
-   len_patch = INT(2*NZ/num_procs)
-   !if (rank_id==0) then
-   !    write(*,*) "numproc= ", num_procs
-   !    write(*,*) "length chorus= ", size(chorus)
-   !    write(*,*) "length eon= ", size(eon,dim=1)
-   !    write(*,*) "length each peon= ", len_patch
-   !end if
+                                !!!initialize parallel threads info
+                                if (rank_id == 0) then
+                                    !tic = OMP_get_wtime()
+                                    allocate(chorus(-NZ:NZ+1),eon(-NZ:NZ,NJ))
+                                    call set_init(eon, chorus)
+                                    call init_chorus(chorus)
+                                    call init_eon(eon, chorus)
+                                    toc = OMP_get_wtime()
+                                    !write(6,*) 'time spent on initializing eon and chorus: ', toc - tic
+                                    write(6,*) 'NZ=', NZ, ' NJ=', NJ, 'NT=', NT, 'dT=', dT, 'omega=', eon(1,1)%omega
+                                end if
+                                if(mod(2*NZ,num_procs) /=0) then
+                                    stop "procs much be factor of NZ"
+                                end if
+                                len_patch = INT(2*NZ/num_procs)
+                                !if (rank_id==0) then
+                                !    write(*,*) "numproc= ", num_procs
+                                !    write(*,*) "length chorus= ", size(chorus)
+                                !    write(*,*) "length eon= ", size(eon,dim=1)
+                                !    write(*,*) "length each peon= ", len_patch
+                                !end if
 
-   allocate(pchorus(1:len_patch),peon(1:len_patch,NJ))
-   call MPI_Bcast(dT,1,mpi_double,0,MPI_COMM_WORLD,ierr)
+                                allocate(pchorus(1:len_patch),peon(1:len_patch,NJ))
+                                call MPI_Bcast(dT,1,mpi_double,0,MPI_COMM_WORLD,ierr)
 
+                                !!start time iteration
+                                start0 = OMP_get_wtime()
+                                do tstep = NT0+1, NT
+                                call MPI_Barrier(MPI_COMM_WORLD,ierr)
+                                if(rank_id==0) then
+                                    start = OMP_get_wtime()
+                                    write(6,*) "steps = ", tstep
+                                    tic = OMP_get_wtime()
+                                end if 
+                                !!scatter chorus for eon calcualtion
+                                !!scatter eon after shift       
+                                do thJ = 1, NJ
+                                    call MPI_Scatter(eon(-NZ:NZ-1,thJ),len_patch,mpi_eon,peon(1:len_patch,thJ),len_patch,mpi_eon,0,MPI_COMM_WORLD,ierr)
+                                end do
+                                call MPI_Scatter(chorus(-NZ:NZ-1),len_patch,mpi_chorus,pchorus(1:len_patch),len_patch,mpi_chorus,0,MPI_COMM_WORLD,ierr)
+                                call MPI_Barrier(MPI_COMM_WORLD,ierr)
+                                if(rank_id == 0) then
+                                    write(6,*) 'time spent on scatter eon and chorus: ', OMP_get_wtime()-tic
+                                    tic = OMP_get_wtime()
+                                end if
 
+                                !$OMP PARALLEL DO schedule(dynamic) COLLAPSE(2)  DEFAULT(PRIVATE) SHARED(peon,pchorus)
+                                do k = 1, len_patch
+                                    do l = 1, NJ
+                                         call trap_eon(peon(k,l), pchorus(k))
+                                    end do
+                                end do
+                                !$OMP END PARALLEL DO
 
-   !!start time iteration
-   start0 = OMP_get_wtime()
-   do tstep = NT0+1, NT
-      call MPI_Barrier(MPI_COMM_WORLD,ierr)
-      if(rank_id==0) then
-         start = OMP_get_wtime()
-         write(6,*) "steps = ", tstep
-         tic = OMP_get_wtime()
-      end if
-      if(rank_id==0) then
-      call interp_ampl(eon,chorus)
-      end if
-      !!scatter chorus for eon calcualtion
-      !!scatter eon after shift
-      do thJ = 1, NJ
-         call MPI_Scatter(eon(-NZ:NZ-1,thJ),len_patch,mpi_eon,peon(1:len_patch,thJ),len_patch,mpi_eon,0,MPI_COMM_WORLD,ierr)
-      end do
-      call MPI_Barrier(MPI_COMM_WORLD,ierr)
-      if(rank_id == 0) then
-         write(6,*) 'time spent on scatter eon and chorus: ', OMP_get_wtime()-tic
-         tic = OMP_get_wtime()
-      end if
+                               ! call MPI_Barrier(MPI_COMM_WORLD,ierr)
+                               ! if(rank_id == 0) then
+                               !     write(6,*) 'time spent on peon: ', OMP_get_wtime()-tic
+                               !     tic = OMP_get_wtime()
+                               ! end if
 
-      !$OMP PARALLEL DO schedule(dynamic) COLLAPSE(2)  DEFAULT(PRIVATE) SHARED(peon,pchorus)
-      do k = 1, len_patch
-         do l = 1, NJ
-            call trap_eon(peon(k,l))
-         end do
-      end do
-      !$OMP END PARALLEL DO
+                                if(rank_id==0) then
+                                    do l = 1, NJ
+                                    call trap_eon(eon(NZ,l), chorus(NZ))
+                                    end do
+                                end if
 
-      ! call MPI_Barrier(MPI_COMM_WORLD,ierr)
-      ! if(rank_id == 0) then
-      !     write(6,*) 'time spent on peon: ', OMP_get_wtime()-tic
-      !     tic = OMP_get_wtime()
-      ! end if
+                                !if(rank_id == 0) then
+                                !    write(6,*) 'time spent on left 1: ', OMP_get_wtime()-tic
+                                !    tic = OMP_get_wtime()
+                                !end if
 
-      if(rank_id==0) then
-         do l = 1, NJ
-            call trap_eon(eon(NZ,l))
-         end do
-      end if
+                                call MPI_Barrier(MPI_COMM_WORLD,ierr)
+                                if(rank_id == 0) then
+                                    !call write_log('time spent on particle solver: ', toc-tic)
+                                    write(6,*) 'time spent on particle solver: ', OMP_get_wtime()-tic
+                                    tic = OMP_get_wtime()
+                                end if
+                                !!!!gather eon for wave calcualtion and output
+                                !!!!send peon(:,thJ),len_patch
+                                !!!!recv eon(-NZ:NZ-1,thJ),len_patch
+                                do thJ = 1, NJ
+                                    call MPI_Gather(peon(1:len_patch,thJ),len_patch,mpi_eon,eon(-NZ:NZ-1,thJ),len_patch,mpi_eon,0,MPI_COMM_WORLD,ierr)
+                                end do
+                                call MPI_Barrier(MPI_COMM_WORLD,ierr)
+                                if(rank_id == 0) then
+                                    !call write_log('time spent on particle solver: ', toc-tic)
+                                    write(6,*) 'time spent on gather eon: ', OMP_get_wtime()-tic
+                                    tic = OMP_get_wtime()
+                                end if
+                                !
+                                !!!!update chorus
+                                !!!!directive on rank 0 global, thus no need to gather, only scatter every time
+                                call MPI_Barrier(MPI_COMM_WORLD,ierr)
+                                if (rank_id == 0) then
+                                        call intgl_source(chorus,eon)
+                                    if(use_adv==1) then
+                                        call update_chorus_adv(chorus)
+                                    else
+                                        call update_chorus(chorus)
+                                    end if
+                                    call shift_eon_sl(eon,chorus)
+                                    write(6,*) 'time spent on wave solver: ', OMP_get_wtime()-tic
+                                    tic = OMP_get_wtime()
+                                end if
 
-      !if(rank_id == 0) then
-      !    write(6,*) 'time spent on left 1: ', OMP_get_wtime()-tic
-      !    tic = OMP_get_wtime()
-      !end if
-
-      call MPI_Barrier(MPI_COMM_WORLD,ierr)
-      if(rank_id == 0) then
-         !call write_log('time spent on particle solver: ', toc-tic)
-         write(6,*) 'time spent on particle solver: ', OMP_get_wtime()-tic
-         tic = OMP_get_wtime()
-      end if
-      !!!!gather eon for wave calcualtion and output
-      !!!!send peon(:,thJ),len_patch
-      !!!!recv eon(-NZ:NZ-1,thJ),len_patch
-      do thJ = 1, NJ
-         call MPI_Gather(peon(1:len_patch,thJ),len_patch,mpi_eon,eon(-NZ:NZ-1,thJ),len_patch,mpi_eon,0,MPI_COMM_WORLD,ierr)
-      end do
-      call MPI_Barrier(MPI_COMM_WORLD,ierr)
-      if(rank_id == 0) then
-         !call write_log('time spent on particle solver: ', toc-tic)
-         write(6,*) 'time spent on gather eon: ', OMP_get_wtime()-tic
-         tic = OMP_get_wtime()
-      end if
-      if(rank_id == 0) then
-        call intgl_source(eon)
-        call interp_intf(eon,chorus)
-      end if
-      !
-      !!!!update chorus
-      !!!!directive on rank 0 global, thus no need to gather, only scatter every time
-      call MPI_Barrier(MPI_COMM_WORLD,ierr)
-      if (rank_id == 0) then
-         if(use_adv==1) then
-            call update_chorus_adv(chorus, eon)
-         else
-            call update_chorus(chorus, eon)
-         end if
-         call shift_eon_zj(eon)
-         write(6,*) 'time spent on wave solver: ', OMP_get_wtime()-tic
-         tic = OMP_get_wtime()
-      end if
-
-      call MPI_Barrier(MPI_COMM_WORLD,ierr)
-      if (rank_id == 0) then
-         call output(eon, chorus, tstep)
-         write(6,*) 'time spent on output: ', OMP_get_wtime()-tic
-         write(6,*) 'total time spent: ', OMP_get_wtime()-start
-      end if
-      !call output_resonance(eon, NZ+1-tstep)
-   end do
-   if (rank_id == 0) then
-      call finalize(eon, chorus, OMP_get_wtime()-start0)
-   end if
-   call MPI_FINALIZE ( ierr )
-end program chorus_MAIN
+                                call MPI_Barrier(MPI_COMM_WORLD,ierr)
+                                if (rank_id == 0) then
+                                    call output(eon, chorus, tstep)
+                                    write(6,*) 'time spent on output: ', OMP_get_wtime()-tic
+                                    write(6,*) 'total time spent: ', OMP_get_wtime()-start
+                                end if
+                                !call output_resonance(eon, NZ+1-tstep)
+                                end do
+                                if (rank_id == 0) then
+                                    call finalize(eon, chorus, OMP_get_wtime()-start0)
+                                end if
+                                call MPI_FINALIZE ( ierr )
+                            end program chorus_MAIN
 

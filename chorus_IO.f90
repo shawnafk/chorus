@@ -37,7 +37,7 @@ module chorus_IO
  
   ! simulation parameters
   integer, parameter  :: NT0 = 0, NT = 800
-  integer, parameter  :: NZ = 500, NJ = 1
+  integer, parameter  :: NZ = 500 , NJ = 1
   !integer, parameter  :: NZ = 500, NJ = 9
   !* simulation latitude region [-15deg, 15deg]
   real(fp), parameter :: LZ = 15.0_fp/180.0_fp*pi*Lshell*RE
@@ -63,7 +63,7 @@ module chorus_IO
 
   ! code control
   logical, parameter :: restart = .FALSE.
-  integer, parameter :: nsave = 100, ncheck = 1000
+  integer, parameter :: nsave_w = 1, nsave_d = 100, ncheck = 1000
   integer, parameter :: stdout = 1           ! stdout=0: output to screen; 1: write to .log
   integer, parameter :: nthread = 1         ! edison:48,  cori: 64
   character(len=10)  :: logfile = "chorus.log"
